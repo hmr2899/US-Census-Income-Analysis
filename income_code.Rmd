@@ -1,0 +1,196 @@
+
+
+```{r}
+#Library packages
+library(psych)
+library(dplyr)
+library(ggplot2)
+library(splitstackshape)
+```
+
+```{r}
+#Read file and insert column name
+adult <- read.csv("adult.csv")
+attach(adult)
+
+colnames(adult)<- c("age", "workclass","fnlwgt","education", "education-num", "marital-status", "occupation","relationship", "race","sex","capital-gain","capital-loss","hours-per-week","native-country","class")
+head(adult)
+```
+
+
+## Q1: How many observations (rows) and how many variables (columns) are there in the raw data?
+```{r}
+sum(adult$fnlwgt)
+#There are 6,179,295,876 observations 
+#For the conveniences of data processing, we will rescale the dataset by dividing adult$fnlwgt by 1000.
+#This means that each row will be replicated by (fnlwgt/1000) times. 
+adult$fnlwgt <- sapply(adult$fnlwgt, function(x) x/10000)
+head(adult)
+
+adult_expanded <- expandRows(adult, "fnlwgt")
+str(adult_expanded)
+#After we rescale the dataset, we can find that there are 14 variables in the raw data.
+```
+
+
+## Q2: Produce a table of variables showing their types.
+```{r}
+#We can use the same function str() to obtain the variable types
+str(adult_expanded)
+
+#and we can create a more clear table to show the types with the information obtained above.
+
+data.frame(name = c("age", "workclass","education", "education-num", "marital-status", "occupation","relationship",
+                                "race","sex","capital-gain","capital-loss","hours-per-week","native-country","class"),
+                 type = c("int","chr","chr","int","chr","chr","chr","chr","chr",
+                          "int","int","int","chr","chr"))
+```
+
+
+# Q3: Some of the variables appear to be numeric but should be treated as categorical. Your best clue is whether a variable has only a few discrete values. Which numeric variables should be treated as categorical?
+
+```{r}
+
+attach(adult_expanded)
+unique(age)
+unique(`education-num`)
+unique(`capital-gain`)
+unique(`capital-loss`)
+unique(`hours-per-week`)
+#Education-num (years of education) should be treated as categorical as there are only a few discrete values.
+#We will convert them into categorical data.
+adult_expanded$`education-num` <-  as.character(adult_expanded$"education-num")
+str(adult_expanded)
+```
+
+
+# Q4: For numeric variables, produce a table of statistics including missing values, min, max, median, mean, standard deviation, skewness and kurtosis.
+```{r}
+
+numeric_variables <- adult_expanded[ , c('age','capital-gain',
+                                         'capital-loss','hours-per-week')]
+
+stas_num_var <- describe(numeric_variables)
+stas_num_var["missing value"] <- sapply(numeric_variables, function(x) sum(is.na(x)))
+
+
+stas_num_var[, c('missing value','min','max','median','mean','sd','skew','kurtosis')]
+```
+
+
+# Q5: How many outliers are present in each numeric variable? Show the tallies in a table. Set them to missing.
+
+```{r}
+boxplot(numeric_variables)
+
+age_num <- length(boxplot(numeric_variables$age)$out)
+capital_gain_num <- length(boxplot(numeric_variables$`capital-gain`)$out)
+capital_loss_num <- length(boxplot(numeric_variables$`capital-loss`)$out)
+hours_per_week_num <- length(boxplot(numeric_variables$`hours-per-week`)$out)
+
+#We can find the number of outliers in these four variables.
+data.frame(name = c("age","capital-gain","capital-loss","hours-per-week"),
+                            outliers = c(age_num,capital_gain_num,capital_loss_num,hours_per_week_num))
+
+#From the boxplot and table, we can find that there are 2596, 49612, 27415, 162095 outliers in variable 'Age', 'Capital-gain', 'Capital-loss', and 'hours-per-week', respectively.
+#However, we will not handle the outliers within capital gain and cpaital loss as the majority of the values are zero and the data points are sparse. These two variables will not have too much impact on the outcome.
+#We will not set the outliers to missing values here because we find a better way to impute the values, and it would be hard to implement the method if we set them to missing values. 
+```
+
+
+# Q6: Count the unique values of each categorical variable, including missing values. Are there any unusual values in any of the categorical variables?
+```{r}
+categorial_value  <- adult_expanded[ , c("workclass","education","education-num", "marital-status", "occupation",
+                                "relationship","race","sex","native-country","class")]
+
+#Counts of the unique values of each categorical variable are shown below:
+sapply(categorial_value, function(x) length(unique(x)))
+
+attach(categorial_value)
+
+aggregate(data.frame(count = workclass), list(value = workclass), length)
+aggregate(data.frame(count = education), list(value = education), length)
+aggregate(data.frame(count = `education-num`), list(value = `education-num`), length)
+aggregate(data.frame(count = `marital-status`), list(value = `marital-status`), length)
+aggregate(data.frame(count = occupation), list(value = occupation), length)
+aggregate(data.frame(count = relationship), list(value = relationship), length)
+aggregate(data.frame(count = race), list(value = race), length)
+aggregate(data.frame(count = sex), list(value = sex), length)
+aggregate(data.frame(count = `native-country`), list(value = `native-country`), length)
+aggregate(data.frame(count = class), list(value = class), length)
+
+#There are no unusua values in any categorial variables.
+#And there are some missing values in variable 'workclass', 'occupation', and 'native-country'. 
+```
+
+
+# Q7: Impute the missing values. Be sure to explain how you did that in your presentation.
+
+```{r}
+#From question 5, we got 2596 and 162095 outliers in variable "Age" and "hours-per-week".
+#We will handle these outliers by replacing them with Q1-1.5*IQR or Q3+1.5IQR based on where they are.
+#Because dataframe "numeric_variables" is a subset of orginal dataframe "adult_expanded", we will just use the orginal file to do the imputation for convinence. 
+boxplot(adult_expanded$age)
+boxplot(adult_expanded$`hours-per-week`)
+
+
+qnt <- quantile(adult_expanded$age, probs=c(.25, .75), na.rm = T)
+H <- 1.5 * IQR(adult_expanded$age, na.rm = T)
+
+adult_expanded$age[adult_expanded$age < (qnt[1] - H)] <- qnt[1] - H
+adult_expanded$age[adult_expanded$age > (qnt[2] + H)] <- qnt[2] + H
+
+
+qnt <- quantile(adult_expanded$`hours-per-week`, probs=c(.25, .75), na.rm = T)
+H <- 1.5 * IQR(adult_expanded$`hours-per-week`, na.rm = T)
+
+adult_expanded$`hours-per-week`[adult_expanded$`hours-per-week` < (qnt[1] - H)] <- qnt[1] - H
+adult_expanded$`hours-per-week`[adult_expanded$`hours-per-week` > (qnt[2] + H)] <- qnt[2] + H
+
+
+
+boxplot(adult_expanded$age)
+boxplot(adult_expanded$`hours-per-week`)
+
+```
+
+
+# Q8: Produce a histogram or boxplot for each of the numeric variables.
+```{r}
+hist(adult_expanded$age)
+hist(adult_expanded$`capital-gain`)
+hist(adult_expanded$`capital-loss`)
+hist(adult_expanded$`hours-per-week`)
+```
+
+
+# Q9: Produce a bar chart for each of the categorical variables showing the counts for each unique value.
+```{r}
+ggplot(adult_expanded, aes(x = workclass)) +
+  geom_bar()
+ggplot(adult_expanded, aes(x = education)) +
+  geom_bar()
+ggplot(adult_expanded, aes(x = `education-num`)) +
+  geom_bar()
+ggplot(adult_expanded, aes(x = `marital-status`)) +
+  geom_bar()
+ggplot(adult_expanded, aes(x = occupation)) +
+  geom_bar()
+ggplot(adult_expanded, aes(x = relationship)) +
+  geom_bar()
+ggplot(adult_expanded, aes(x = race)) +
+  geom_bar()
+ggplot(adult_expanded, aes(x = sex)) +
+  geom_bar()
+ggplot(adult_expanded, aes(x = `native-country`)) +
+  geom_bar()
+```
+```{r}
+
+```
+
+
+```{r}
+df <- adult_expanded[, c(1,2,3,5,6,7,8,9,12,13,14)]
+write.csv(df,"C:/Users/colin/downloads/cleandata.csv",row.names = FALSE)
+```
